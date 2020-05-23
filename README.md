@@ -1,5 +1,5 @@
 # MOT
-Exploring a self-supervised learning approache for Multi-Object Tracking by leveraging contrastive learning, keypoint estimation, and onstraint dominant sets clustering.
+Exploring a self-supervised learning approach for Multi-Object Tracking by leveraging contrastive learning, keypoint estimation, and onstraint dominant sets clustering.
 
 > **Tracking Objects as Points** <br>
 > Xingyi Zhou, Vladlen Koltun, Philipp Krähenbühl <br>
