@@ -1,33 +1,95 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
-import torchvision.models as models
 import torch
-import torch.nn as nn
-import os
 
-from .networks.dla import DLASeg
-from .networks.resdcn import PoseResDCN
-from .networks.resnet import PoseResNet
-from .networks.dlav0 import DLASegv0
-from .networks.generic_network import GenericNetwork
+from datasets.coco import COCO
+# from .datasets.kitti import KITTI
+# from .datasets.coco_hp import COCOHP
+# from .datasets.mot import MOT
+# from .datasets.nuscenes import nuScenes
+# from .datasets.crowdhuman import CrowdHuman
+# from .datasets.kitti_tracking import KITTITracking
+# from .datasets.custom_dataset import
 
-_network_factory = {
-    'resdcn': PoseResDCN,
-    'dla': DLASeg,
-    'res': PoseResNet,
-    'dlav0': DLASegv0,
-    'generic': GenericNetwork
-}
+from networks.dla import DLASeg
+# from .networks.resdcn import PoseResDCN
+# from .networks.resnet import PoseResNet
+# from .networks.dlav0 import DLASegv0
+# from .networks.generic_network import GenericNetwork
+
+def get_optimizer(optim, lr, model):
+    if optim == 'adam':
+        optimizer = torch.optim.Adam(model.parameters(), lr)
+    elif optim == 'sgd':
+        optimizer = torch.optim.SGD(model.parameters(), lr, momentum=0.9, weight_decay=0.0001)
+    else:
+        assert 0, optim
+
+    return optimizer
 
 
-def create_model(arch, head, head_conv, opt=None):
+def get_dataset(dataset):
+    dataset_dict = {
+      'custom': CustomDataset,
+      'coco': COCO,
+      'kitti': KITTI,
+      'coco_hp': COCOHP,
+      'mot': MOT,
+      'nuscenes': nuScenes,
+      'crowdhuman': CrowdHuman,
+      'kitti_tracking': KITTITracking,
+    }
+
+    return dataset_dict[dataset]
+
+def get_model(arch, opt):
+    network_dict = {
+        'dla': DLASeg
+        # 'resdcn': PoseResDCN,
+        # 'res': PoseResNet,
+        # 'dlav0': DLASegv0,
+        # 'generic': GenericNetwork
+    }
+
     num_layers = int(arch[arch.find('_') + 1:]) if '_' in arch else 0
     arch = arch[:arch.find('_')] if '_' in arch else arch
-    model_class = _network_factory[arch]
-    model = model_class(num_layers, heads=head, head_convs=head_conv, opt=opt)
+
+    try:
+        model_class = network_dict[arch]
+    except KeyError:
+        print('chosen architecture {} is not supported'.format(arch))
+
+    model = model_class(num_layers, heads=opt.heads, head_convs=opt.head_conv, opt=opt)
+
     return model
+
+
+def update_dataset_and_head_info(opt, dataset):
+    opt.num_classes = dataset.num_categories \
+        if opt.num_classes < 0 else opt.num_classes
+
+    input_height, input_width = dataset.input_size
+    input_height = opt.height if opt.height > 0 else input_height
+    input_width = opt.width if opt.width > 0 else input_width
+    opt.input_size = (input_height, input_width)
+
+    opt.heads = {'hm': opt.num_classes,  # Heatmap heat
+                 'reg': 2,
+                 'wh': 2,
+                 'tracking': 2}
+
+    weight_dict = {'hm': opt.hm_weight,
+                   'wh': opt.wh_weight,
+                   'reg': opt.off_weight,
+                   'tracking': opt.tracking_weight}
+
+    opt.weights = {head: weight_dict[head] for head in opt.heads}
+    for head in opt.weights:
+        if opt.weights[head] == 0:
+            del opt.heads[head]
+
+    opt.head_conv = {head: [opt.head_conv
+                            for i in range(opt.num_head_conv if head != 'reg' else 1)]
+                     for head in opt.heads}
+    return opt
 
 
 def load_model(model, model_path, opt, optimizer=None):
