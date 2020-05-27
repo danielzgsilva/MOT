@@ -1,15 +1,18 @@
 import torch
 
-from datasets.coco import COCO
+# from datasets.coco import COCO
 # from .datasets.kitti import KITTI
 # from .datasets.coco_hp import COCOHP
-# from .datasets.mot import MOT
+from ..datasets.mot import MOT
 # from .datasets.nuscenes import nuScenes
 # from .datasets.crowdhuman import CrowdHuman
 # from .datasets.kitti_tracking import KITTITracking
 # from .datasets.custom_dataset import
 
-from networks.dla import DLASeg
+from ..networks.dla import DLASeg
+from ..losses import GenericLoss
+
+
 # from .networks.resdcn import PoseResDCN
 # from .networks.resnet import PoseResNet
 # from .networks.dlav0 import DLASegv0
@@ -28,17 +31,18 @@ def get_optimizer(optim, lr, model):
 
 def get_dataset(dataset):
     dataset_dict = {
-      'custom': CustomDataset,
-      'coco': COCO,
-      'kitti': KITTI,
-      'coco_hp': COCOHP,
-      'mot': MOT,
-      'nuscenes': nuScenes,
-      'crowdhuman': CrowdHuman,
-      'kitti_tracking': KITTITracking,
+        # 'custom': CustomDataset,
+        # 'coco': COCO,
+        # 'kitti': KITTI,
+        # 'coco_hp': COCOHP,
+        'mot': MOT
+        # 'nuscenes': nuScenes,
+        # 'crowdhuman': CrowdHuman,
+        # 'kitti_tracking': KITTITracking,
     }
 
     return dataset_dict[dataset]
+
 
 def get_model(arch, opt):
     network_dict = {
@@ -60,6 +64,36 @@ def get_model(arch, opt):
     model = model_class(num_layers, heads=opt.heads, head_convs=opt.head_conv, opt=opt)
 
     return model
+
+
+class AverageMeter(object):
+    """Computes and stores the average and current value"""
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.val = 0
+        self.avg = 0
+        self.sum = 0
+        self.count = 0
+
+    def update(self, val, n=1):
+        self.val = val
+        self.sum += val * n
+        self.count += n
+        if self.count > 0:
+          self.avg = self.sum / self.count
+
+
+def get_losses(opt):
+    loss_order = ['hm', 'wh', 'reg', 'ltrb', 'hps', 'hm_hp', \
+      'hp_offset', 'dep', 'dim', 'rot', 'amodel_offset', \
+      'ltrb_amodal', 'tracking', 'nuscenes_att', 'velocity']
+
+    loss_states = ['tot'] + [k for k in loss_order if k in opt.heads]
+    loss = GenericLoss(opt)
+
+    return loss_states, loss
 
 
 def update_dataset_and_head_info(opt, dataset):

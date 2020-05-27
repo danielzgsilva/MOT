@@ -19,16 +19,15 @@ class Logger(object):
         if not os.path.exists(opt.save_dir):
             os.makedirs(opt.save_dir)
 
-        model_folder = os.path.join(opt.save_dir, opt.model_name)
-        if not os.path.exists(model_folder):
-            os.makedirs(model_folder)
+        if not os.path.exists(opt.model_folder):
+            os.makedirs(opt.model_folder)
 
         time_str = time.strftime('%Y-%m-%d-%H-%M')
 
         args = dict((name, getattr(opt, name)) for name in dir(opt)
                     if not name.startswith('_'))
 
-        file_name = os.path.join(model_folder, 'opt.txt')
+        file_name = os.path.join(opt.model_folder, 'opt.txt')
         with open(file_name, 'wt') as opt_file:
             opt_file.write('==> commit hash: {}\n'.format(
                 subprocess.check_output(["git", "describe"])))
@@ -41,7 +40,7 @@ class Logger(object):
             for k, v in sorted(args.items()):
                 opt_file.write('  %s: %s\n' % (str(k), str(v)))
 
-        log_dir = os.path.join(model_folder, 'logs_{}'.format(time_str))
+        log_dir = os.path.join(opt.model_folder, 'logs_{}'.format(time_str))
         if USE_TENSORBOARD:
             self.writer = tensorboardX.SummaryWriter(log_dir=log_dir)
         else:

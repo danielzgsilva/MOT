@@ -14,10 +14,11 @@ class TrainingOptions:
                                  help="dataset to train on",
                                  default='coco',
                                  choices=['coco', 'mot17', 'waymo'])
-        self.parser.add_argument("--data_path",
+        self.parser.add_argument("--data_dir",
                                  type=str,
-                                 help="path to the training data",
-                                 default=os.path.join(file_dir, 'cityscapes'))
+                                 help="path to the folder where dataset is stored",
+                                 default=os.path.join(file_dir, 'data'))
+        self.parser.add_argument('--dataset_version', default='')
 
         # Model
         self.parser.add_argument("--save_dir",
@@ -84,9 +85,11 @@ class TrainingOptions:
                                  type=int,
                                  help="number of dataloader workers",
                                  default=8)
-        self.parser.add_argument("--save_all",
-                                 action='store_true',
-                                 help="save model to disk every 5 epochs")
+        self.parser.add_argument("--save_period",
+                                 type=int,
+                                 help="save model every this many epochs'",
+                                 default=5)
+
         self.parser.add_argument('--reset_hm', action='store_true')
         self.parser.add_argument('--reuse_hm', action='store_true')
 
@@ -117,6 +120,8 @@ class TrainingOptions:
 
     def parse(self):
         opt = self.parser.parse_args()
+
+        opt.model_folder = os.path.join(opt.save_dir, opt.model_name)
 
         opt.lr_step = [int(i) for i in opt.lr_step.split(',')]
 
