@@ -16,7 +16,7 @@ from .base_model import BaseModel
 
 try:
     from .DCNv2.dcn_v2 import DCN
-except:
+except ImportError:
     print('import DCN failed')
     DCN = None
 

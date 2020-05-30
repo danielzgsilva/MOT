@@ -1,5 +1,5 @@
-from .options import TrainingOptions
-from .trainer import UnSupervisedTrainer
+from options import TrainingOptions
+from trainer import UnSupervisedTrainer
 
 options = TrainingOptions()
 opts = options.parse()

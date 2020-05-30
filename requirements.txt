@@ -9,3 +9,10 @@ pyquaternion
 nuscenes-devkit
 pyyaml
 motmetrics
+torchvision
+torch
+numpy
+scikit-learn
+pycocotools
+pillow
+pandas

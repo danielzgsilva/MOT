@@ -3,14 +3,15 @@ import torch
 # from datasets.coco import COCO
 # from .datasets.kitti import KITTI
 # from .datasets.coco_hp import COCOHP
-from ..datasets.mot import MOT
+from datasets.mot import MOT
+from datasets.kitti_tracking import KITTITracking
 # from .datasets.nuscenes import nuScenes
 # from .datasets.crowdhuman import CrowdHuman
 # from .datasets.kitti_tracking import KITTITracking
 # from .datasets.custom_dataset import
 
-from ..networks.dla import DLASeg
-from ..losses import GenericLoss
+from networks.dla import DLASeg
+from losses import GenericLoss
 
 
 # from .networks.resdcn import PoseResDCN
@@ -35,10 +36,10 @@ def get_dataset(dataset):
         # 'coco': COCO,
         # 'kitti': KITTI,
         # 'coco_hp': COCOHP,
-        'mot': MOT
+        'mot': MOT,
         # 'nuscenes': nuScenes,
         # 'crowdhuman': CrowdHuman,
-        # 'kitti_tracking': KITTITracking,
+        'kitti_tracking': KITTITracking
     }
 
     return dataset_dict[dataset]
@@ -58,16 +59,27 @@ def get_model(arch, opt):
 
     try:
         model_class = network_dict[arch]
+        model = model_class(num_layers, heads=opt.heads, head_convs=opt.head_conv, opt=opt)
+        return model
+
     except KeyError:
         print('chosen architecture {} is not supported'.format(arch))
 
-    model = model_class(num_layers, heads=opt.heads, head_convs=opt.head_conv, opt=opt)
 
-    return model
+def get_losses(opt):
+    loss_order = ['hm', 'wh', 'reg', 'ltrb', 'hps', 'hm_hp',
+                  'hp_offset', 'dep', 'dim', 'rot', 'amodel_offset',
+                  'ltrb_amodal', 'tracking', 'nuscenes_att', 'velocity']
+
+    loss_states = ['tot'] + [k for k in loss_order if k in opt.heads]
+    loss = GenericLoss(opt)
+
+    return loss_states, loss
 
 
 class AverageMeter(object):
     """Computes and stores the average and current value"""
+
     def __init__(self):
         self.reset()
 
@@ -82,30 +94,22 @@ class AverageMeter(object):
         self.sum += val * n
         self.count += n
         if self.count > 0:
-          self.avg = self.sum / self.count
-
-
-def get_losses(opt):
-    loss_order = ['hm', 'wh', 'reg', 'ltrb', 'hps', 'hm_hp', \
-      'hp_offset', 'dep', 'dim', 'rot', 'amodel_offset', \
-      'ltrb_amodal', 'tracking', 'nuscenes_att', 'velocity']
-
-    loss_states = ['tot'] + [k for k in loss_order if k in opt.heads]
-    loss = GenericLoss(opt)
-
-    return loss_states, loss
+            self.avg = self.sum / self.count
 
 
 def update_dataset_and_head_info(opt, dataset):
     opt.num_classes = dataset.num_categories \
         if opt.num_classes < 0 else opt.num_classes
 
-    input_height, input_width = dataset.input_size
+    input_height, input_width = dataset.default_resolution
     input_height = opt.height if opt.height > 0 else input_height
     input_width = opt.width if opt.width > 0 else input_width
-    opt.input_size = (input_height, input_width)
 
-    opt.heads = {'hm': opt.num_classes,  # Heatmap heat
+    opt.input_size = (input_height, input_width)
+    opt.height, opt.width = input_height, input_width
+    opt.output_h, opt.output_w = input_height // opt.down_ratio, input_width // opt.down_ratio
+
+    opt.heads = {'hm': opt.num_classes,
                  'reg': 2,
                  'wh': 2,
                  'tracking': 2}
@@ -113,7 +117,14 @@ def update_dataset_and_head_info(opt, dataset):
     weight_dict = {'hm': opt.hm_weight,
                    'wh': opt.wh_weight,
                    'reg': opt.off_weight,
-                   'tracking': opt.tracking_weight}
+                   'tracking': opt.tracking_weight,
+                   'ltrb': opt.ltrb_weight,
+                   'ltrb_amodal': opt.ltrb_amodal_weight}
+
+    if opt.ltrb:
+        opt.heads.update({'ltrb': 4})
+    if opt.ltrb_amodal:
+        opt.heads.update({'ltrb_amodal': 4})
 
     opt.weights = {head: weight_dict[head] for head in opt.heads}
     for head in opt.weights:

@@ -4,30 +4,30 @@ from torch.utils.data import DataLoader
 
 import time
 import os
-from progress.bar import Bar
+from progress.bar import Bar, ChargingBar
 
-from .logger import Logger
-from .utils.utils import get_model, get_optimizer, get_dataset, get_losses, \
+from logger import Logger
+from utils.utils import get_model, get_optimizer, get_dataset, get_losses, \
     load_model, save_model, update_dataset_and_head_info, AverageMeter
 
 
 class UnSupervisedTrainer:
-    def __init__(self, args):
-        self.data_dir = args.data_dir
+    def __init__(self, opt):
+        self.data_dir = opt.data_dir
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-        self.save_dir = args.save_dir
-        self.model_name = args.model_name
-        self.model_arch = args.model_arch
+        self.save_dir = opt.save_dir
+        self.model_name = opt.model_name
+        self.model_arch = opt.model_arch
 
         # Training parameters
-        self.batch_size = int(args.batch_size)
-        self.num_workers = int(args.num_workers)
-        self.epochs = int(args.num_epochs)
-        self.lr = float(args.learning_rate)
-        self.lr_step = args.lr_step
+        self.batch_size = int(opt.batch_size)
+        self.num_workers = int(opt.num_workers)
+        self.epochs = int(opt.num_epochs)
+        self.lr = float(opt.lr)
+        self.lr_step = opt.lr_step
 
-        DatasetClass = get_dataset(args.dataset)
-        self.opt = update_dataset_and_head_info(args, DatasetClass)
+        DatasetClass = get_dataset(opt.dataset)
+        self.opt = update_dataset_and_head_info(opt, DatasetClass)
 
         self.logger = Logger(self.opt)
 
@@ -40,19 +40,21 @@ class UnSupervisedTrainer:
                 self.model, self.opt.load_model, self.opt, self.optimizer)
 
         self.model.to(self.device)
-        print(self.model)
 
         # Get optimizer
         self.optimizer = get_optimizer(self.opt.optim, self.lr, self.model)
 
         # Loss function and optimizer
-        self.loss_stats, self.loss = get_losses(self.opt)
+        self.loss_states, self.loss = get_losses(self.opt)
 
         print('Training options:\n'
               '\tModel: {}\n\tInput size: {}\n\tBatch size: {}\n'
-              '\tEpochs: {}\n\t''Learning rate: {}\n\tLR Steps: {}\n'.
+              '\tEpochs: {}\n\t''Learning rate: {}\n\tLR Steps: {}\n'
+              '\tHeads: {}\n\t''Weights: {}\n\tHead Conv: {}\n'
+              '\tLosses: {}\n'.
               format(self.model_arch.capitalize(), self.opt.input_size, self.batch_size, self.epochs,
-                     self.lr, self.lr_step))
+                     self.lr, self.lr_step, self.opt.heads, self.opt.weights, self.opt.head_conv,
+                     self.loss_states))
 
         # Creating PyTorch datasets
         self.datasets = dict()
@@ -78,14 +80,14 @@ class UnSupervisedTrainer:
 
         data_time, batch_time = AverageMeter(), AverageMeter()
 
-        avg_loss_stats = {l: AverageMeter() for l in self.loss_stats \
+        avg_loss_stats = {l: AverageMeter() for l in self.loss_states \
                           if l == 'tot' or self.opt.weights[l] > 0}
 
-        num_iters = len(self.dataloaders[phase])
-        bar = Bar('{}'.format(self.model_name, max=num_iters))
+        bar = Bar('{}'.format(self.model_name, max=len(self.dataloaders[phase])))
         end = time.time()
 
         # Looping through batches
+        # batch keys: image', 'pre_img', 'pre_hm', 'hm', 'ind', 'cat', 'mask', 'reg', 'reg_mask', 'wh', 'wh_mask', 'tracking', 'tracking_mask
         for i, batch in enumerate(self.dataloaders[phase]):
             data_time.update(time.time() - end)
 
@@ -101,10 +103,11 @@ class UnSupervisedTrainer:
             with torch.set_grad_enabled(phase == 'train'):
 
                 # This calls the forward() function on a batch of inputs
+                # keys: hm, tracking, reg, wh
                 outputs = self.model(batch['image'], pre_img, pre_hm)
 
                 # Calculate the loss of the batch
-                loss, loss_stats = self.loss(outputs, batch)
+                loss, loss_states = self.loss(outputs, batch)
                 loss = loss.mean()
 
                 # Adjust weights through backprop if we're in training phase
@@ -116,21 +119,21 @@ class UnSupervisedTrainer:
             batch_time.update(time.time() - end)
             end = time.time()
 
-            Bar.suffix = '{phase}: [{0}][{1}/{2}]|Tot: {total:} |ETA: {eta:} '.format(
-                epoch, i, num_iters, phase=phase,
+            Bar.suffix = '{phase}: [{0}][{1}/{2}]| Tot: {total:} | ETA: {eta:} '.format(
+                epoch, bar.index, bar.max, phase=phase,
                 total=bar.elapsed_td, eta=bar.eta_td)
 
             for l in avg_loss_stats:
-                avg_loss_stats[l].update(loss_stats[l].mean().item(), batch['image'].size(0))
-                Bar.suffix = Bar.suffix + '|{} {:.4f} '.format(l, avg_loss_stats[l].avg)
+                avg_loss_stats[l].update(loss_states[l].mean().item(), batch['image'].size(0))
+                Bar.suffix = Bar.suffix + ' | {}: {:.4f} '.format(l, avg_loss_stats[l].avg)
 
-            Bar.suffix = Bar.suffix + '|Data {dt.val:.3f}s({dt.avg:.3f}s) ' \
-                                      '|Net {bt.avg:.3f}s'.format(dt=data_time, bt=batch_time)
+            Bar.suffix = Bar.suffix + '| Data {dt.val:.3f}s({dt.avg:.3f}s) ' \
+                                      '| Net {bt.avg:.3f}s'.format(dt=data_time, bt=batch_time)
 
             # print('{}/{}| {}'.format(opt.task, opt.exp_id, Bar.suffix))
             bar.next()
 
-            del outputs, loss, loss_stats
+            del outputs, loss, loss_states
 
         bar.finish()
         ret = {k: v.avg for k, v in avg_loss_stats.items()}
@@ -150,14 +153,14 @@ class UnSupervisedTrainer:
         for epoch in range(1, self.epochs + 1):
 
             epoch_start = time.time()
-            self.logger.write('epoch: {} |'.format(epoch))
+            self.logger.write('epoch: {} | '.format(epoch))
 
             # Training phase
             log_dict_train = self.run_epoch('train', epoch)
 
             for k, v in log_dict_train.items():
                 self.logger.scalar_summary('train_{}'.format(k), v, epoch)
-                self.logger.write('{} {:8f} | '.format(k, v))
+                self.logger.write('{} {:7f} | '.format(k, v))
 
             # Validation phase
             log_dict_val = self.run_epoch('val', epoch)
@@ -167,8 +170,9 @@ class UnSupervisedTrainer:
 
             for k, v in log_dict_val.items():
                 self.logger.scalar_summary('val_{}'.format(k), v, epoch)
-                self.logger.write('{} {:8f} | '.format(k, v))
+                self.logger.write('{} {:7f} | '.format(k, v))
 
+            self.logger.write('\n')
             epoch_time = time.time() - epoch_start
 
             ''' # Print statistics after the validation phase

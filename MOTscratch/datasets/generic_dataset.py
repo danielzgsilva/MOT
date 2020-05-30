@@ -9,9 +9,10 @@ import pycocotools.coco as coco
 import torch
 import torch.utils.data as data
 
-from ..utils.transforms import flip, color_aug
-from ..utils.transforms import get_affine_transform, affine_transform
-from ..utils.transforms import gaussian_radius, draw_umich_gaussian
+from utils.transforms import flip, color_aug
+from utils.transforms import get_affine_transform, affine_transform
+from utils.transforms import gaussian_radius, draw_umich_gaussian
+
 import copy
 
 
@@ -89,7 +90,7 @@ class GenericDataset(data.Dataset):
                 anns = self._flip_anns(anns, width)
 
         trans_input = get_affine_transform(
-            c, s, rot, [opt.input_w, opt.input_h])
+            c, s, rot, [opt.width, opt.height])
         trans_output = get_affine_transform(
             c, s, rot, [opt.output_w, opt.output_h])
         inp = self._get_input(img, trans_input)
@@ -112,7 +113,7 @@ class GenericDataset(data.Dataset):
                     c, s, width, height, disturb=True)
                 s_pre = s * aug_s_pre
                 trans_input_pre = get_affine_transform(
-                    c_pre, s_pre, rot, [opt.input_w, opt.input_h])
+                    c_pre, s_pre, rot, [opt.width, opt.height])
                 trans_output_pre = get_affine_transform(
                     c_pre, s_pre, rot, [opt.output_w, opt.output_h])
             pre_img = self._get_input(pre_image, trans_input_pre)
@@ -174,8 +175,9 @@ class GenericDataset(data.Dataset):
 
     def _load_pre_data(self, video_id, frame_id, sensor_id=1):
         img_infos = self.video_to_images[video_id]
-        # If training, random sample nearby frames as the "previoud" frame
-        # If testing, get the exact prevous frame
+        # If training, random sample nearby frames as the "previous" frame
+        # If testing, get the exact previous frame
+
         if 'train' in self.split:
             img_ids = [(img_info['id'], img_info['frame_id']) \
                        for img_info in img_infos \
@@ -198,7 +200,7 @@ class GenericDataset(data.Dataset):
         return img, anns, frame_dist
 
     def _get_pre_dets(self, anns, trans_input, trans_output):
-        hm_h, hm_w = self.opt.input_h, self.opt.input_w
+        hm_h, hm_w = self.opt.height, self.opt.width
         down_ratio = self.opt.down_ratio
         trans = trans_input
         reutrn_hm = self.opt.pre_hm
@@ -265,8 +267,10 @@ class GenericDataset(data.Dataset):
         else:
             sf = self.opt.scale
             cf = self.opt.shift
-            if type(s) == float:
-                s = [s, s]
+
+            '''if type(s) == float:
+                s = [s, s]'''
+
             c[0] += s * np.clip(np.random.randn() * cf, -2 * cf, 2 * cf)
             c[1] += s * np.clip(np.random.randn() * cf, -2 * cf, 2 * cf)
             aug_s = np.clip(np.random.randn() * sf + 1, 1 - sf, 1 + sf)
@@ -308,7 +312,7 @@ class GenericDataset(data.Dataset):
 
     def _get_input(self, img, trans_input):
         inp = cv2.warpAffine(img, trans_input,
-                             (self.opt.input_w, self.opt.input_h),
+                             (self.opt.width, self.opt.height),
                              flags=cv2.INTER_LINEAR)
 
         inp = (inp.astype(np.float32) / 255.)

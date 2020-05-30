@@ -3,7 +3,7 @@
 
 import torch
 import torch.nn as nn
-from MOTscratch.utils.utils import _tranpose_and_gather_feat
+from utils.model import _tranpose_and_gather_feat, _sigmoid
 import torch.nn.functional as F
 
 
@@ -35,6 +35,7 @@ class GenericLoss(torch.nn.Module):
             output = outputs[s]
             output = self._sigmoid_output(output)
 
+            # Heatmap loss
             if 'hm' in output:
                 losses['hm'] += self.crit(
                     output['hm'], batch['hm'], batch['ind'],
