@@ -84,18 +84,6 @@ class TrainingOptions:
                                  type=int,
                                  help="number of dataloader workers",
                                  default=8)
-        self.parser.add_argument("--save_period",
-                                 type=int,
-                                 help="save model every this many epochs'",
-                                 default=5)
-        self.parser.add_argument('--debug', type=int, default=0,
-                                 help='level of visualization.'
-                                      '1: only show the final detection results'
-                                      '2: show the network output features'
-                                      '3: use matplot to display'  # useful when lunching training with ipython notebook
-                                      '4: save all visualizations to disk')
-
-        # Input size
         self.parser.add_argument("--height",
                                  type=int,
                                  help="input image height. -1 for default from dataset",
@@ -104,6 +92,29 @@ class TrainingOptions:
                                  type=int,
                                  help="input image width. -1 for default from dataset",
                                  default=-1)
+
+        # Logging parameters
+        self.parser.add_argument("--save_period",
+                                 type=int,
+                                 help="save model every this many epochs'",
+                                 default=5)
+        self.parser.add_argument('--eval_val', action='store_true')
+        self.parser.add_argument('--debug', type=int, default=0,
+                                 help='level of visualization.'
+                                      '1: only show the final detection results'
+                                      '2: show the network output features'
+                                      '3: use matplot to display'  # useful when lunching training with ipython notebook
+                                      '4: save all visualizations to disk')
+        self.parser.add_argument('--vis_thresh', type=float, default=0.3,
+                                 help='visualization threshold.')
+        self.parser.add_argument('--debugger_theme', default='white',
+                                 choices=['white', 'black'])
+        self.parser.add_argument('--show_track_color', action='store_true')
+        self.parser.add_argument('--not_show_bbox', action='store_true')
+        self.parser.add_argument('--not_show_number', action='store_true')
+        self.parser.add_argument('--qualitative', action='store_true')
+        self.parser.add_argument('--tango_color', action='store_true')
+
 
         # Augmentation options
         self.parser.add_argument('--not_rand_crop', action='store_true',
@@ -183,6 +194,8 @@ class TrainingOptions:
         self.parser.add_argument('--zero_tracking', action='store_true')
         self.parser.add_argument('--hungarian', action='store_true')
         self.parser.add_argument('--max_age', type=int, default=-1)
+        self.parser.add_argument('--K', type=int, default=100,
+                                 help='max number of output objects.')
 
     def parse(self):
         opt = self.parser.parse_args()
@@ -196,6 +209,10 @@ class TrainingOptions:
 
         opt.pad = 127 if 'hourglass' in opt.model_arch else 31
         opt.num_stacks = 2 if opt.model_arch == 'hourglass' else 1
+
+        if opt.debug > 0:
+            opt.num_workers = 0
+            opt.batch_size = 1
 
         opt.tracking = True
         opt.pre_img = False if opt.no_pre_img else True

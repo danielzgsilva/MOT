@@ -53,11 +53,14 @@ def flip_lr_off(x, flip_idx):
 
 
 def _nms(heat, kernel=3):
+    """Max pooling"""
+
     pad = (kernel - 1) // 2
 
     hmax = nn.functional.max_pool2d(
         heat, (kernel, kernel), stride=1, padding=pad)
     keep = (hmax == heat).float()
+
     return heat * keep
 
 

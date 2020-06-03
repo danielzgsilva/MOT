@@ -1,15 +1,19 @@
 import torch
-import torch.nn as nn
 from torch.utils.data import DataLoader
 
+import numpy as np
 import time
 import os
 from progress.bar import Bar, ChargingBar
 
 from logger import Logger
-from utils.utils import get_model, get_optimizer, get_dataset, get_losses, \
-    load_model, save_model, update_dataset_and_head_info, AverageMeter
 
+from utils.generic_utils import get_dataset, get_model, get_losses, get_optimizer
+from utils.generic_utils import update_dataset_and_head_info, load_model, save_model, AverageMeter
+
+from utils.post_process import generic_post_process
+from utils.decode import generic_decode
+from utils.debugger import Debugger
 
 class UnSupervisedTrainer:
     def __init__(self, opt):
@@ -51,10 +55,10 @@ class UnSupervisedTrainer:
               '\tModel: {}\n\tInput size: {}\n\tBatch size: {}\n'
               '\tEpochs: {}\n\t''Learning rate: {}\n\tLR Steps: {}\n'
               '\tHeads: {}\n\t''Weights: {}\n\tHead Conv: {}\n'
-              '\tLosses: {}\n'.
+              '\tLosses: {}\n\tDebug level: {}\n'.
               format(self.model_arch.capitalize(), self.opt.input_size, self.batch_size, self.epochs,
                      self.lr, self.lr_step, self.opt.heads, self.opt.weights, self.opt.head_conv,
-                     self.loss_states))
+                     self.loss_states, self.opt.debug))
 
         # Creating PyTorch datasets
         self.datasets = dict()
@@ -63,9 +67,7 @@ class UnSupervisedTrainer:
 
         self.dataset_lens = [self.datasets[i].__len__() for i in ['train', 'val']]
 
-        print('Training on:\n'
-              '\tTrain files: {}\n\tValidation files: {}\n'
-              .format(*self.dataset_lens))
+        print('Training on:\n\tTrain files: {}\n\tValidation files: {}\n'.format(*self.dataset_lens))
 
         # Creating PyTorch dataloaders
         self.dataloaders = {i: DataLoader(self.datasets[i], batch_size=self.batch_size, shuffle=True,
@@ -78,12 +80,13 @@ class UnSupervisedTrainer:
         else:
             self.model.eval()
 
+        results = {}
         data_time, batch_time = AverageMeter(), AverageMeter()
 
         avg_loss_stats = {l: AverageMeter() for l in self.loss_states \
                           if l == 'tot' or self.opt.weights[l] > 0}
 
-        bar = Bar('{}'.format(self.model_name, max=len(self.dataloaders[phase])))
+        bar = Bar('{}'.format(self.model_name), max=len(self.dataloaders[phase]))
         end = time.time()
 
         # Looping through batches
@@ -130,15 +133,17 @@ class UnSupervisedTrainer:
             Bar.suffix = Bar.suffix + '| Data {dt.val:.3f}s({dt.avg:.3f}s) ' \
                                       '| Net {bt.avg:.3f}s'.format(dt=data_time, bt=batch_time)
 
-            # print('{}/{}| {}'.format(opt.task, opt.exp_id, Bar.suffix))
             bar.next()
+
+            if self.opt.debug > 0:
+                self.debug(batch, outputs[-1], i, dataset=self.dataloaders[phase].dataset)
 
             del outputs, loss, loss_states
 
         bar.finish()
         ret = {k: v.avg for k, v in avg_loss_stats.items()}
         ret['time'] = bar.elapsed_td.total_seconds() / 60.
-        return ret
+        return ret, results
 
     def train(self):
         start = time.time()
@@ -156,17 +161,17 @@ class UnSupervisedTrainer:
             self.logger.write('epoch: {} | '.format(epoch))
 
             # Training phase
-            log_dict_train = self.run_epoch('train', epoch)
+            log_dict_train, _ = self.run_epoch('train', epoch)
 
             for k, v in log_dict_train.items():
                 self.logger.scalar_summary('train_{}'.format(k), v, epoch)
                 self.logger.write('{} {:7f} | '.format(k, v))
 
             # Validation phase
-            log_dict_val = self.run_epoch('val', epoch)
+            log_dict_val, preds = self.run_epoch('val', epoch)
 
-            # if opt.eval_val:
-            #    val_loader.dataset.run_eval(preds, opt.save_dir)
+            if self.opt.eval_val:
+                self.dataloaders['val'].dataset.run_eval(preds, self.opt.save_dir)
 
             for k, v in log_dict_val.items():
                 self.logger.scalar_summary('val_{}'.format(k), v, epoch)
@@ -211,3 +216,124 @@ class UnSupervisedTrainer:
 
         self.logger.close()
         return
+
+    def debug(self, batch, output, iter_id, dataset):
+        opt = self.opt
+        if 'pre_hm' in batch:
+            output.update({'pre_hm': batch['pre_hm']})
+        dets = generic_decode(output, K=opt.K, opt=opt)
+        print(dets.keys())
+        for k in dets:
+            dets[k] = dets[k].detach().cpu().numpy()
+        dets_gt = batch['meta']['gt_det']
+        print(dets_gt.keys())
+        for i in range(1):
+            debugger = Debugger(opt=opt, dataset=dataset)
+            img = batch['image'][i].detach().cpu().numpy().transpose(1, 2, 0)
+            img = np.clip(((img * dataset.std + dataset.mean) * 255.), 0, 255).astype(np.uint8)
+            pred = debugger.gen_colormap(output['hm'][i].detach().cpu().numpy())
+            gt = debugger.gen_colormap(batch['hm'][i].detach().cpu().numpy())
+            debugger.add_blend_img(img, pred, 'pred_hm')
+            debugger.add_blend_img(img, gt, 'gt_hm')
+
+            if 'pre_img' in batch:
+                pre_img = batch['pre_img'][i].detach().cpu().numpy().transpose(1, 2, 0)
+                pre_img = np.clip(((pre_img * dataset.std + dataset.mean) * 255), 0, 255).astype(np.uint8)
+                debugger.add_img(pre_img, 'pre_img_pred')
+                debugger.add_img(pre_img, 'pre_img_gt')
+                if 'pre_hm' in batch:
+                    pre_hm = debugger.gen_colormap(
+                        batch['pre_hm'][i].detach().cpu().numpy())
+                    debugger.add_blend_img(pre_img, pre_hm, 'pre_hm')
+
+            debugger.add_img(img, img_id='out_pred')
+            if 'ltrb_amodal' in opt.heads:
+                debugger.add_img(img, img_id='out_pred_amodal')
+                debugger.add_img(img, img_id='out_gt_amodal')
+
+            # Predictions
+            for k in range(len(dets['scores'][i])):
+                if dets['scores'][i, k] > opt.vis_thresh:
+                    debugger.add_coco_bbox(
+                        dets['bboxes'][i, k] * opt.down_ratio, dets['clses'][i, k],
+                        dets['scores'][i, k], img_id='out_pred')
+
+                    if 'ltrb_amodal' in opt.heads:
+                        debugger.add_coco_bbox(
+                            dets['bboxes_amodal'][i, k] * opt.down_ratio, dets['clses'][i, k],
+                            dets['scores'][i, k], img_id='out_pred_amodal')
+
+                    if 'hps' in opt.heads and int(dets['clses'][i, k]) == 0:
+                        debugger.add_coco_hp(
+                            dets['hps'][i, k] * opt.down_ratio, img_id='out_pred')
+
+                    if 'tracking' in opt.heads:
+                        debugger.add_arrow(
+                            dets['cts'][i][k] * opt.down_ratio,
+                            dets['tracking'][i][k] * opt.down_ratio, img_id='out_pred')
+                        debugger.add_arrow(
+                            dets['cts'][i][k] * opt.down_ratio,
+                            dets['tracking'][i][k] * opt.down_ratio, img_id='pre_img_pred')
+
+            # Ground truth
+            debugger.add_img(img, img_id='out_gt')
+            for k in range(len(dets_gt['scores'][i])):
+                if dets_gt['scores'][i][k] > opt.vis_thresh:
+                    debugger.add_coco_bbox(
+                        dets_gt['bboxes'][i][k] * opt.down_ratio, dets_gt['clses'][i][k],
+                        dets_gt['scores'][i][k], img_id='out_gt')
+
+                    if 'ltrb_amodal' in opt.heads:
+                        debugger.add_coco_bbox(
+                            dets_gt['bboxes_amodal'][i, k] * opt.down_ratio,
+                            dets_gt['clses'][i, k],
+                            dets_gt['scores'][i, k], img_id='out_gt_amodal')
+
+                    if 'hps' in opt.heads and \
+                            (int(dets['clses'][i, k]) == 0):
+                        debugger.add_coco_hp(
+                            dets_gt['hps'][i][k] * opt.down_ratio, img_id='out_gt')
+
+                    if 'tracking' in opt.heads:
+                        debugger.add_arrow(
+                            dets_gt['cts'][i][k] * opt.down_ratio,
+                            dets_gt['tracking'][i][k] * opt.down_ratio, img_id='out_gt')
+                        debugger.add_arrow(
+                            dets_gt['cts'][i][k] * opt.down_ratio,
+                            dets_gt['tracking'][i][k] * opt.down_ratio, img_id='pre_img_gt')
+
+            if 'hm_hp' in opt.heads:
+                pred = debugger.gen_colormap_hp(
+                    output['hm_hp'][i].detach().cpu().numpy())
+                gt = debugger.gen_colormap_hp(batch['hm_hp'][i].detach().cpu().numpy())
+                debugger.add_blend_img(img, pred, 'pred_hmhp')
+                debugger.add_blend_img(img, gt, 'gt_hmhp')
+
+            if 'rot' in opt.heads and 'dim' in opt.heads and 'dep' in opt.heads:
+                dets_gt = {k: dets_gt[k].cpu().numpy() for k in dets_gt}
+                calib = batch['meta']['calib'].detach().numpy() \
+                    if 'calib' in batch['meta'] else None
+                det_pred = generic_post_process(opt, dets,
+                                                batch['meta']['c'].cpu().numpy(), batch['meta']['s'].cpu().numpy(),
+                                                output['hm'].shape[2], output['hm'].shape[3], self.opt.num_classes,
+                                                calib)
+                det_gt = generic_post_process(opt, dets_gt,
+                                              batch['meta']['c'].cpu().numpy(), batch['meta']['s'].cpu().numpy(),
+                                              output['hm'].shape[2], output['hm'].shape[3], self.opt.num_classes,
+                                              calib)
+
+                debugger.add_3d_detection(
+                    batch['meta']['img_path'][i], batch['meta']['flipped'][i],
+                    det_pred[i], calib[i],
+                    vis_thresh=opt.vis_thresh, img_id='add_pred')
+                debugger.add_3d_detection(
+                    batch['meta']['img_path'][i], batch['meta']['flipped'][i],
+                    det_gt[i], calib[i],
+                    vis_thresh=opt.vis_thresh, img_id='add_gt')
+                debugger.add_bird_views(det_pred[i], det_gt[i],
+                                        vis_thresh=opt.vis_thresh, img_id='bird_pred_gt')
+
+            if opt.debug == 4:
+                debugger.save_all_imgs(opt.debug_dir, prefix='{}'.format(iter_id))
+            else:
+                debugger.show_all_imgs(pause=True)

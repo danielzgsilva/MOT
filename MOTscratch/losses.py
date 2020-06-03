@@ -3,7 +3,7 @@
 
 import torch
 import torch.nn as nn
-from utils.model import _tranpose_and_gather_feat, _sigmoid
+from utils.model_utils import _tranpose_and_gather_feat, _sigmoid
 import torch.nn.functional as F
 
 
