@@ -12,8 +12,12 @@ from utils.generic_utils import get_dataset, get_model, get_losses, get_optimize
 from utils.generic_utils import update_dataset_and_head_info, load_model, save_model, AverageMeter
 
 from utils.post_process import generic_post_process
-from utils.decode import generic_decode
+from utils.decode import generic_decode, extract_objects
 from utils.debugger import Debugger
+
+from networks.resnet_simclr import ResNetSimCLR
+
+import cv2
 
 class UnSupervisedTrainer:
     def __init__(self, opt):
@@ -37,6 +41,7 @@ class UnSupervisedTrainer:
 
         # Create model and place on gpu
         self.model = get_model(self.model_arch, self.opt)
+        self.feature_extractor = ResNetSimCLR('resnet18', 256)
 
         self.start_epoch = 0
         if self.opt.load_model != '':
@@ -44,6 +49,7 @@ class UnSupervisedTrainer:
                 self.model, self.opt.load_model, self.opt, self.optimizer)
 
         self.model.to(self.device)
+        self.feature_extractor.to(self.device)
 
         # Get optimizer
         self.optimizer = get_optimizer(self.opt.optim, self.lr, self.model)
@@ -89,7 +95,6 @@ class UnSupervisedTrainer:
         bar = Bar('{}'.format(self.model_name), max=len(self.dataloaders[phase]))
         end = time.time()
 
-        # Looping through batches
         # batch keys: image', 'pre_img', 'pre_hm', 'hm', 'ind', 'cat', 'mask', 'reg', 'reg_mask', 'wh', 'wh_mask', 'tracking', 'tracking_mask
         for i, batch in enumerate(self.dataloaders[phase]):
             data_time.update(time.time() - end)
@@ -105,13 +110,22 @@ class UnSupervisedTrainer:
             # Calculate gradients only if we're in the training phase
             with torch.set_grad_enabled(phase == 'train'):
 
-                # This calls the forward() function on a batch of inputs
-                # keys: hm, tracking, reg, wh
+                # output keys: hm, tracking, reg, wh
                 outputs = self.model(batch['image'], pre_img, pre_hm)
 
                 # Calculate the loss of the batch
                 loss, loss_states = self.loss(outputs, batch)
                 loss = loss.mean()
+
+                # Figure out why generic decode has to be done after loss computation
+                # Extract detected objects
+                objs = extract_objects(batch, outputs[-1], self.opt)
+
+                # Apply transformations to objects
+                # Generate feature vectors
+                # Get ground truth objs from previous image
+                # Find way to visualize objs -> augmented -> clustering
+                # Get w leul for bipartite grpah and clustering
 
                 # Adjust weights through backprop if we're in training phase
                 if phase == 'train':
@@ -221,12 +235,13 @@ class UnSupervisedTrainer:
         opt = self.opt
         if 'pre_hm' in batch:
             output.update({'pre_hm': batch['pre_hm']})
+
         dets = generic_decode(output, K=opt.K, opt=opt)
-        print(dets.keys())
         for k in dets:
             dets[k] = dets[k].detach().cpu().numpy()
+
         dets_gt = batch['meta']['gt_det']
-        print(dets_gt.keys())
+
         for i in range(1):
             debugger = Debugger(opt=opt, dataset=dataset)
             img = batch['image'][i].detach().cpu().numpy().transpose(1, 2, 0)
@@ -274,6 +289,12 @@ class UnSupervisedTrainer:
                         debugger.add_arrow(
                             dets['cts'][i][k] * opt.down_ratio,
                             dets['tracking'][i][k] * opt.down_ratio, img_id='pre_img_pred')
+
+                    # Extracting detected object
+                    x1, y1, x2, y2 = [int(round(x)) for x in dets['bboxes'][i, k] * opt.down_ratio]
+                    obj = img[y1:y2, x1:x2, :]
+                    name = '{}{:.1f}'.format(debugger.names[int(dets['clses'][i, k])], dets['scores'][i, k])
+                    debugger.add_img(obj, img_id=name)
 
             # Ground truth
             debugger.add_img(img, img_id='out_gt')

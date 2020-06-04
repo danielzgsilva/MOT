@@ -177,3 +177,36 @@ def generic_decode(output, K=100, opt=None):
             [pre_xs.unsqueeze(2), pre_ys.unsqueeze(2)], dim=2)
 
     return ret
+
+
+def extract_objects(batch, output, opt):
+    # Decode output of network
+
+    dets = generic_decode(output, K=opt.K, opt=opt)
+
+    batch_size = len(dets['scores'])
+
+    assert batch_size == opt.batch_size
+
+    ret = []
+
+    # For each image in a batch
+    for i in range(opt.batch_size):
+        img = batch['image'][i]
+        objs = []
+
+        # Extract predicted objects that have high confidence
+        for k in range(len(dets['scores'][i])):
+            if dets['scores'][i, k].item() > opt.out_thresh:
+
+                # Get coordinates of bbox
+                bbox = dets['bboxes'][i, k] * opt.down_ratio
+                x1, y1, x2, y2 = [int(round(c.item())) for c in bbox]
+
+                # Crop image (torch tensor image so channels first)
+                obj = img[:, y1:y2, x1:x2]
+                objs.append(obj)
+
+        ret.append(objs)
+
+    return ret
