@@ -17,6 +17,8 @@ from utils.debugger import Debugger
 
 from networks.resnet_simclr import ResNetSimCLR
 
+from utils.transforms import augment_objects
+
 import cv2
 
 class UnSupervisedTrainer:
@@ -122,7 +124,20 @@ class UnSupervisedTrainer:
                 objs = extract_objects(batch, outputs[-1], self.opt)
 
                 # Apply transformations to objects
+                xis, xjs = augment_objects(objs)
+
+                for b in range(len(xis)):
+                    for xi, xj in zip(xis[b], xjs[b]):
+                        xi = xi.detach().cpu().numpy().transpose(1, 2, 0)
+                        xi = np.clip(((xi * self.datasets['train'].std + self.datasets['train'].mean) * 255.), 0, 255).astype(np.uint8)
+                        xj = xj.detach().cpu().numpy().transpose(1, 2, 0)
+                        xi = np.clip(((xj * self.datasets['train'].std + self.datasets['train'].mean) * 255.), 0,
+                                     255).astype(np.uint8)
+                        cv2.imshow('xi', xi)
+                        cv2.imshow('xj', xj)
+
                 # Generate feature vectors
+
                 # Get ground truth objs from previous image
                 # Find way to visualize objs -> augmented -> clustering
                 # Get w leul for bipartite grpah and clustering

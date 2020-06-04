@@ -2,7 +2,9 @@ import numpy as np
 import cv2
 import random
 
+import torch
 import torchvision.transforms as transforms
+
 
 class GaussianBlur(object):
     # Implements Gaussian blur as described in the SimCLR paper
@@ -24,16 +26,55 @@ class GaussianBlur(object):
 
         return sample
 
-def get_simclr_transform(s, input_shape):
-    # get a set of data augmentation transformations as described in the SimCLR paper.
+
+def get_simclr_transforms(s, input_size):
+    # get a set of data augmentations as described in the SimCLR paper.
+    # Takes in a tensor image and outputs a tensor image
+
     color_jitter = transforms.ColorJitter(0.8 * s, 0.8 * s, 0.8 * s, 0.2 * s)
-    data_transforms = transforms.Compose([transforms.RandomResizedCrop(size=input_shape[0]),
-                                          transforms.RandomHorizontalFlip(),
-                                          transforms.RandomApply([color_jitter], p=0.8),
-                                          transforms.RandomGrayscale(p=0.2),
-                                          GaussianBlur(kernel_size=int(0.1 * input_shape[0])),
+    data_transforms = transforms.Compose([transforms.ToPILImage(),
+                                          transforms.RandomResizedCrop(size=input_size),
+                                          #transforms.RandomHorizontalFlip(),
+                                          #transforms.RandomApply([color_jitter], p=0.8),
+                                          #transforms.RandomGrayscale(p=0.2),
+                                          #GaussianBlur(kernel_size=int(0.1 * input_size)),
                                           transforms.ToTensor()])
     return data_transforms
+
+
+def augment_objects(objs):
+    batch_size = len(objs)
+
+    simclr_transform = get_simclr_transforms(s=1, input_size=96)
+
+    batch_of_xis = []
+    batch_of_xjs = []
+
+    for b in range(batch_size):
+        xis = []
+        xjs = []
+
+        for obj in objs[b]:
+            obj = obj.cpu()
+
+            xi = simclr_transform(obj)
+            xj = simclr_transform(obj)
+
+            xis.append(xi)
+            xjs.append(xj)
+
+        if xis:
+            xis = torch.stack(xis)
+            print(xis.size())
+        if xjs:
+            xjs = torch.stack(xjs)
+            print(xjs.size())
+
+        batch_of_xis.append(xis)
+        batch_of_xjs.append(xjs)
+
+    return batch_of_xis, batch_of_xjs
+
 
 def flip(img):
     return img[:, :, ::-1].copy()

@@ -204,8 +204,9 @@ def extract_objects(batch, output, opt):
                 x1, y1, x2, y2 = [int(round(c.item())) for c in bbox]
 
                 # Crop image (torch tensor image so channels first)
-                obj = img[:, y1:y2, x1:x2]
-                objs.append(obj)
+                if y2 - y1 > 0 and x2 - x1 > 0:
+                    obj = img[:, y1:y2, x1:x2]
+                    objs.append(obj)
 
         ret.append(objs)
 
