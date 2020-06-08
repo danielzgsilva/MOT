@@ -94,6 +94,9 @@ class TrainingOptions:
                                  default=-1)
 
         # Logging parameters
+        self.parser.add_argument('--no_bar',
+                                 action='store_true',
+                                 help="Do not display the interactive training bar and simply print losses")
         self.parser.add_argument("--save_period",
                                  type=int,
                                  help="save model every this many epochs'",

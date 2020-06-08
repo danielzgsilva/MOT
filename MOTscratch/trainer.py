@@ -130,10 +130,14 @@ class UnSupervisedTrainer:
                 avg_loss_stats[l].update(loss_states[l].mean().item(), batch['image'].size(0))
                 Bar.suffix = Bar.suffix + ' | {}: {:.4f} '.format(l, avg_loss_stats[l].avg)
 
-            Bar.suffix = Bar.suffix + '| Data {dt.val:.3f}s({dt.avg:.3f}s) ' \
-                                      '| Net {bt.avg:.3f}s'.format(dt=data_time, bt=batch_time)
+            Bar.suffix = Bar.suffix + '| Data {dt.val:.3f}s({dt.avg:.2f}s) ' \
+                                      '| Net {bt.avg:.2f}s'.format(dt=data_time, bt=batch_time)
 
-            bar.next()
+            if self.opt.no_bar:
+                print('{} | {}'.format(self.model_name, Bar.suffix))
+                bar.index += 1
+            else:
+                bar.next()
 
             if self.opt.debug > 0:
                 self.debug(batch, outputs[-1], i, dataset=self.dataloaders[phase].dataset)
