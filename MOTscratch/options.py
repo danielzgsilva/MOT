@@ -68,22 +68,22 @@ class TrainingOptions:
         self.parser.add_argument("--batch_size",
                                  type=int,
                                  help="batch size",
-                                 default=8)
+                                 default=32 )
         self.parser.add_argument("--lr",
                                  type=float,
                                  help="learning rate",
                                  default=1.25e-4)
         self.parser.add_argument("--num_epochs",
                                  help="number of epochs",
-                                 default=20)
+                                 default=70)
         self.parser.add_argument("--lr_step",
                                  type=str,
                                  help="epochs on which to reduce the learning rate by factor of 10",
-                                 default='10,15')
+                                 default='60')
         self.parser.add_argument("--num_workers",
                                  type=int,
                                  help="number of dataloader workers",
-                                 default=8)
+                                 default=6)
         self.parser.add_argument("--height",
                                  type=int,
                                  help="input image height. -1 for default from dataset",
